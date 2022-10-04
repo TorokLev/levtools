@@ -1,0 +1,6 @@
+pymc3
+pytest
+pytest-cov
+pytest-env
+redis
+redis-py-cluster
