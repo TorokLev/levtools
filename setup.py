@@ -25,10 +25,10 @@ def fread(filename):
 
 
 setuptools.setup(
-    name="daa_ml_models",
+    name="levtools",
     version=get_version_from_init("levtools/__init__.py"),
     author="Levente Torok",
-    author_email="levente.torok@daalab.com",
+    author_email="toroklev@gmail.com",
     description="",
     long_description=fread('README.md'),
     long_description_content_type="text/markdown",
