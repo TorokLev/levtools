@@ -3,7 +3,7 @@ import math
 import scipy
 import scipy.optimize
 import scipy.stats
-import pymc3 as pm
+import pymc as pm
 
 import arviz as az
 from matplotlib import pylab as plt
@@ -230,14 +230,14 @@ class SigmoidBinomialPredictor(SigmoidPredictor):
 
 class SigmoidBinomialBayesianPredictor(SigmoidPredictor):
 
-    def __init__(self, steps=3000, burnin=150, *args, **kwargs):
+    def __init__(self, steps=3000, burnin=None, *args, **kwargs):
         """
         Suggested methods: "L-BFGS-B", "trust-constr" ( a bit better but 10x slower), "Nelder-Mead" ( a bit worse )
         """
 
         self.sb = SigmoidBinomialPredictor(*args, **kwargs)
         self.steps = steps
-        self.burnin = burnin
+        self.burnin = steps // 2 if burnin is None else burnin
         #placeholder
         self.trace = None
 
@@ -259,20 +259,22 @@ class SigmoidBinomialBayesianPredictor(SigmoidPredictor):
             #self.trace = pm.sample(self.steps, init="adapt_diag", return_inferencedata=False)
 
             self.mean_field = pm.fit(method='advi', callbacks=[pm.callbacks.CheckParametersConvergence()])
-            self.trace = pm.sample(self.steps, tune=self.steps//2, target_accept=.99)
+            self.trace = pm.sample(self.steps, tune=self.burnin, target_accept=.99)
+
         return self
 
     def predict(self, x, std=True):
         # parameter means
         y_preds = []
-        for slope, x_offset, y_max in zip(self.trace['slope'][self.burnin:],
-                                          self.trace['x_offset'][self.burnin:],
-                                          self.trace['y_max'][self.burnin:]):
+        for slope, x_offset, y_max in zip(self.trace['posterior']['slope'].values.reshape(-1).tolist(),
+                                          self.trace['posterior']['x_offset'].values.reshape(-1).tolist(),
+                                          self.trace['posterior']['y_max'].values.reshape(-1).tolist()):
 
             theta = [-slope, x_offset, y_max]
             y_preds.append(get_sigmoid_fn(*theta, limited=False)(x))
 
         y_preds = np.array(y_preds)
+
         pred_mean = y_preds.mean(axis=0)
         pred_std = y_preds.std(axis=0)
 

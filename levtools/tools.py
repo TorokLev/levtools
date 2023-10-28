@@ -294,7 +294,7 @@ class FindDistribution:
                             'param_bounds': ['pos', 'any', 'pos']}
                            ]
 
-    def __init__(self, loss, bins=30, repeat_times=1, best_or_avg='best'):  # loss = neg_likelihood, neg_log_likelihood
+    def __init__(self, loss_type, bins=30, repeat_times=1, best_or_avg='best'):  # loss = neg_likelihood, neg_log_likelihood
 
         loss_mapper = \
             {'ks': {'loss_func': FindDistribution.get_ks_test, 'space': 'cum_hist'},
@@ -304,9 +304,10 @@ class FindDistribution:
              'sym_kldiv': {'loss_func': FindDistribution.get_sym_kldiv, 'space': 'hist'},
              'L2': {'loss_func': FindDistribution.get_L2, 'space': 'hist', 'bins': bins}}
 
-        self.loss_func = loss_mapper[loss]['loss_func']
-        self.space = loss_mapper[loss]['space']
-        self.bins = bins if 'bins' not in loss_mapper[loss] else loss_mapper[loss]['bins']
+        self.loss_type = loss_type
+        self.loss_func = loss_mapper[loss_type]['loss_func']
+        self.space = loss_mapper[loss_type]['space']
+        self.bins = bins if 'bins' not in loss_mapper[loss_type] else loss_mapper[loss_type]['bins']
         self.repeat_times = repeat_times
         self.best_or_avg = best_or_avg
 
@@ -357,7 +358,7 @@ class FindDistribution:
             -np.abs(parameter_item) if range == 'neg' else parameter_item)
                 for parameter_item, range in zip(parameters, parameter_ranges)]
 
-    def get_loss(self, parameters):
+    def get_loss_value(self, parameters):
         parameters = self.limit_to_par_bounds(parameters, self.cur_param_bounds)
         distr = self.cur_distr_class(*parameters)  # TODO: Ugly
 
@@ -378,8 +379,8 @@ class FindDistribution:
         self.data_cum_hist = np.cumsum(self.data_hist)
 
     def fit_one_distrib(self, x, distrib_name, noise_level=0.01):
-        distrib_desc = [distrib for distrib in FindDistribution.distrib_descriptors if distrib['name'] == distrib_name][
-            0]
+
+        distrib_desc = [distrib for distrib in FindDistribution.distrib_descriptors if distrib['name'] == distrib_name][0]
         n_pars = len(distrib_desc['param_bounds'])
 
         par0 = distrib_desc['class'].fit(data=x)
@@ -389,10 +390,10 @@ class FindDistribution:
         self.cur_distr_class = distrib_desc['class']  # TODO: Ugly
         self.cur_param_bounds = distrib_desc['param_bounds']
 
-        opt = scipy.optimize.minimize(self.get_loss, par0)
+        opt = scipy.optimize.minimize(self.get_loss_value, par0)
 
         opt_par = self.limit_to_par_bounds(opt['x'], parameter_ranges=distrib_desc['param_bounds'])
-        opt_loss = opt['fun']  # self.get_loss(opt_par)
+        opt_loss = opt['fun']  # self.get_loss_value(opt_par)
 
         return {'name': distrib_name, 'par': opt_par, 'n_params': len(opt_par), 'loss': opt_loss,
                 'class': distrib_desc['class']}
@@ -407,22 +408,20 @@ class FindDistribution:
 
     def fit_repeated_times(self, distribution, x):
 
-        print(distribution['name'])
-
         self._calc_histogram(x)
         res = [self.fit_one_distrib(x, distribution['name'], noise_level=0.0 if ix > 0 else 0)
                for ix in range(self.repeat_times)]
 
         pd.set_option('use_inf_as_na', True)
-        res = pd.DataFrame(res).dropna().sort_values(by='loss', ascending=True)
+        res_df = pd.DataFrame.from_records(res).dropna(axis=0).sort_values(by='loss', ascending=True)
 
         if self.best_or_avg == 'best':
-            if len(res) > 0:
-                return res.iloc[0]
+            if len(res_df) > 0:
+                return res_df.iloc[0]
             else:
-                print("Cannot find non failing distribution parameterization")
+                print("Cannot find non failing distribution ", distribution['name'], "parameterization: ", self.loss_type)
         elif self.best_or_avg == 'avg':
-            return self._get_mean_of_res(res)
+            return self._get_mean_of_res(res_df)
 
     def fit(self, x):
 

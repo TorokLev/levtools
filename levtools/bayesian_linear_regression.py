@@ -3,7 +3,7 @@ import pandas as pd
 import scipy.stats
 from matplotlib import pylab as plt
 import numpy as np
-import pymc3 as pm
+import pymc as pm
 from warnings import simplefilter
 
 from . import tools as t
@@ -205,15 +205,15 @@ class BayesianLinReg():
 
         with pm.Model() as bm:
             # Priors
-            intercept = pm.Normal('y_offset', mu=0, sd=self.intercept_prior_std)
-            slope = pm.Normal('slope', mu=0, sd=self.slope_prior_std)
-            obs_noise = pm.HalfNormal('obs_noise', sd=self.obs_noise_prior_std)
+            intercept = pm.Normal('y_offset', mu=0, sigma=self.intercept_prior_std)
+            slope = pm.Normal('slope', mu=0, sigma=self.slope_prior_std)
+            obs_noise = pm.HalfNormal('obs_noise', sigma=self.obs_noise_prior_std)
 
             # Deterministics part
             mu = intercept + slope * x
 
             # Likelihood 
-            y_likelihood = pm.Normal('Ylikelihood', mu=mu, sd=obs_noise, observed=y)
+            y_likelihood = pm.Normal('Ylikelihood', mu=mu, sigma=obs_noise, observed=y)
             self.trace = pm.sample(self.steps)
             return self
 

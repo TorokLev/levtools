@@ -1,4 +1,4 @@
-pymc3
+pymc>=5.9
 pytest
 pytest-cov
 pytest-env
