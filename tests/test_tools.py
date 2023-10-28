@@ -115,15 +115,8 @@ def test_one_encoder():
 def test_if_find_distrib_class_works():
 
     x = np.random.randn(100)
-    fd = t.FindDistribution(loss='ks')
-    fd.fit(x)
-    fd = t.FindDistribution(loss='kldiv')
-    fd.fit(x)
-    fd = t.FindDistribution(loss='sym_kldiv')
-    fd.fit(x)
-    fd = t.FindDistribution(loss='L2')
-    fd.fit(x)
-    fd = t.FindDistribution(loss='neg_lik')
-    fd.fit(x)
-    fd = t.FindDistribution(loss='neg_log_lik')
-    fd.fit(x)
+    
+    for loss in ['ks', 'kldiv', 'sym_kldiv', 'L2', 'neg_lik', 'neg_log_lik']:
+        fd = t.FindDistribution(loss_type=loss)
+        fd.fit(x)
+
