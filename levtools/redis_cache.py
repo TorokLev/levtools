@@ -90,6 +90,7 @@ def cache_get(key):
         logging.error("Redis server corrupted response!")
 
     except Exception as e:
+        server_down()
         logging.error("Redis server error: " + str(e))
 
 
@@ -141,7 +142,7 @@ def cache(**decorator_kwargs):
             if not check_server_alive():
                 return func(*func_args, **func_kwargs)
 
-            cache_key = {'func': func.__globals__['__file__'] + '::' + func.__name__,
+            cache_key = {'func': func.__module__ + '::' + func.__name__,
                          'func_args': str(func_args),
                          'func_kwargs': str(func_kwargs),
                          'decorator_kwargs': str(decorator_kwargs)
@@ -180,14 +181,20 @@ def setup(host='127.0.0.1', port=6379, startup_nodes=None, prefix="", expire=120
         conn = rediscluster.RedisCluster(startup_nodes=startup_nodes, decode_responses=True, **kwargs)
         logging.debug("RedisCluster client started")
 
+    server_up()
+    conn.flushall()
+
 
 def close():
     global conn
     global server_alive
+    global check_deadline
 
-    print("Close called")
-    server_alive = False
 
     if conn:
         conn.close()
         conn = None
+
+    server_alive = False
+    check_deadline = -1
+
