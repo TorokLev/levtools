@@ -181,8 +181,11 @@ def setup(host='127.0.0.1', port=6379, startup_nodes=None, prefix="", expire=120
         conn = rediscluster.RedisCluster(startup_nodes=startup_nodes, decode_responses=True, **kwargs)
         logging.debug("RedisCluster client started")
 
-    server_up()
-    conn.flushall()
+    if check_server_alive():
+        conn.flushall()
+    else:
+        logging.warning("No Redis server found")
+
 
 
 def close():
