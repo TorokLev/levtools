@@ -215,10 +215,13 @@ class BayesianLinReg():
             # Likelihood 
             y_likelihood = pm.Normal('Ylikelihood', mu=mu, sigma=obs_noise, observed=y)
             self.trace = pm.sample(self.steps)
+
             return self
 
     def get_posterior_samples(self, x):
-        return np.array([(step['slope'] * x + step['y_offset']) for step in self.trace[self.burnin:]])
+        slopes = self.trace.posterior['slope'].values.reshape(-1)
+        y_offsets = self.trace.posterior['y_offset'].values.reshape(-1)
+        return np.array([(slope * x + y_offset) for slope, y_offset in zip(slopes, y_offsets)])
 
     def predict(self, x, std=True):
         """
