@@ -17,6 +17,9 @@ from . import utils as u
 
 
 # Singleton since modules are singleton in Python
+# Only server_up and server_down are meant to be used for manipulating these variables
+# and server_alive for checking
+
 server_alive = False
 conn = None
 key_expire = 1200
@@ -27,6 +30,9 @@ _alive_check_timeout = 5
 
 
 def server_down():
+    """
+    sets internal state variable to down
+    """
     global server_alive
     global check_deadline
     global _alive_check_timeout
@@ -37,6 +43,9 @@ def server_down():
 
 
 def server_up():
+    """
+    sets internal state variable to up
+    """
     global server_alive
     global check_deadline
 
@@ -45,7 +54,7 @@ def server_up():
     check_deadline = -1
 
 
-def check_server_alive() -> bool:
+def check_server_alive(enforce_check=False) -> bool:
     global conn
     global server_alive
     global check_deadline
@@ -53,14 +62,16 @@ def check_server_alive() -> bool:
     if server_alive:
         return True
 
-    if check_deadline < time.time():
+    if check_deadline < time.time() or enforce_check:
         try:
             conn.ping()
             server_up()
             return True
         except:
             server_down()
-            return False
+
+    return False
+
 
 
 def gen_hash(input_str):
@@ -141,7 +152,7 @@ def cache(**decorator_kwargs):
             if not check_server_alive():
                 return func(*func_args, **func_kwargs)
 
-            cache_key = {'func': func.__globals__['__file__'] + '::' + func.__name__,
+            cache_key = {'func': func.__globals__['__file__'] + '::' + str(func),
                          'func_args': str(func_args),
                          'func_kwargs': str(func_kwargs),
                          'decorator_kwargs': str(decorator_kwargs)
@@ -180,12 +191,12 @@ def setup(host='127.0.0.1', port=6379, startup_nodes=None, prefix="", expire=120
         conn = rediscluster.RedisCluster(startup_nodes=startup_nodes, decode_responses=True, **kwargs)
         logging.debug("RedisCluster client started")
 
+    check_server_alive(enforce_check=True)
 
 def close():
     global conn
     global server_alive
 
-    print("Close called")
     server_alive = False
 
     if conn:

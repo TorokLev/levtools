@@ -34,5 +34,5 @@ def test_bayesian_lin_reg():
 
     clf = blr.BayesianLinReg(steps=10)
     clf.fit(df['x'], df['y'])
-    #y_pred, y_pred = clf.predict(df['x'])
+    y_pred, y_pred = clf.predict(df['x'])
 
