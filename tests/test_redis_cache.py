@@ -28,6 +28,7 @@ def test_redis_func_decorator_without_redis_server():
 
     not_from_cache = None
 
+    # missing setup to prevent redis client connection
     @redis_cache.cache()
     def dummy(variable):
         nonlocal not_from_cache

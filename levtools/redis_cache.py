@@ -101,6 +101,7 @@ def cache_get(key):
         logging.error("Redis server corrupted response!")
 
     except Exception as e:
+        server_down()
         logging.error("Redis server error: " + str(e))
 
 
@@ -192,13 +193,23 @@ def setup(host='127.0.0.1', port=6379, startup_nodes=None, prefix="", expire=120
         logging.debug("RedisCluster client started")
 
     check_server_alive(enforce_check=True)
+    if check_server_alive():
+        conn.flushall()
+    else:
+        logging.warning("No Redis server found")
+
 
 def close():
     global conn
     global server_alive
+    global check_deadline
 
     server_alive = False
 
     if conn:
         conn.close()
         conn = None
+
+    server_alive = False
+    check_deadline = -1
+
