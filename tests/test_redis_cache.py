@@ -154,7 +154,6 @@ def test_redis_subfunc_decorator_with_redis_server():
     redis_cache.close()
 
 
-
 def test_redis_cache_shared_across_processes():
 
     redis_cache.setup(prefix="test_redis_cache", shared_across_processes=True)
@@ -196,3 +195,28 @@ def test_redis_cache_shared_across_processes():
 
     assert return_dict['calculated'] == 13
     assert not return_dict['calculated_in_func']
+
+
+def test_checkpoint_caching():
+
+    redis_cache.setup(prefix="test_redis_cache", shared_across_processes=True)
+    if not redis_cache.check_server_alive():
+        logging.error("Redis server cannot be connected to.")
+        return
+    redis_cache.delete_all_keys_starting_with("test_redis_cache")
+
+    calculated_in_func = False
+    def calculator_func(variable):
+        nonlocal calculated_in_func
+        calculated_in_func = True
+        return variable + 3
+
+    value = redis_cache.checkpoint_caching(key="pytest_checkpoint_caching", func=calculator_func, func_args=[3])
+    assert value == 6
+    assert calculated_in_func == True
+
+    calculated_in_func = False
+
+    value = redis_cache.checkpoint_caching(key="pytest_checkpoint_caching", func=calculator_func, func_args=[3])
+    assert value == 6
+    assert calculated_in_func == False
