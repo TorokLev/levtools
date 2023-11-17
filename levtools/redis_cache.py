@@ -27,6 +27,7 @@ key_prefix = ""
 
 check_deadline = -1
 _alive_check_timeout = 5
+_shared_across_processes = True
 
 
 def server_down():
@@ -73,21 +74,19 @@ def check_server_alive(enforce_check=False) -> bool:
     return False
 
 
-
 def gen_hash(input_str):
     return str(hashlib.sha256(input_str.encode('utf-8')).hexdigest())
 
 
-def generate_cache_key(input_dict):
-    cache_key = key_prefix + ":" + gen_hash(json.dumps(input_dict))
-    return cache_key
+def generate_hash_with_prefix(input_dict):
+    return key_prefix + ":" + gen_hash(json.dumps(input_dict))
 
 
 def cache_get(key):
     global conn
 
     try:
-        cache_key = generate_cache_key(key)
+        cache_key = generate_hash_with_prefix(key)
         response = conn.get(cache_key)
         if response:
             decoded_response = json.loads(response)
@@ -124,7 +123,7 @@ def cache_set(key, value):
     global key_expire
 
     try:
-        cache_key = generate_cache_key(key)
+        cache_key = generate_hash_with_prefix(key)
         value_json = u.to_json(value)
 
         conn.set(cache_key, value_json)
@@ -142,32 +141,48 @@ def cache_set(key, value):
         logging.error("Redis cache disabled in cache_set! + Exception: " + str(e))
 
 
-# decorator
+def _convert_func_call_attributes_to_str(func, func_args, func_kwargs, decorator_kwargs):
+    func_name = str(func)
+
+    if _shared_across_processes:
+        func_name = func_name[:func_name.find("at")] + ">"
+
+    module = func.__globals__['__file__']
+
+    cache_key = {'func': module + '::' + func_name,
+                 'func_args': str(func_args),
+                 'func_kwargs': str(func_kwargs),
+                 'decorator_kwargs': str(decorator_kwargs)
+                 }
+
+    return cache_key
+
+
 def cache(**decorator_kwargs):
+    """
+    Decorator
+    """
+
     global server_alive
     global key_prefix
 
     def decorator(func):
+
         @functools.wraps(func)
         def wrapper(*func_args, **func_kwargs):
             if not check_server_alive():
                 return func(*func_args, **func_kwargs)
 
-            cache_key = {'func': func.__globals__['__file__'] + '::' + str(func),
-                         'func_args': str(func_args),
-                         'func_kwargs': str(func_kwargs),
-                         'decorator_kwargs': str(decorator_kwargs)
-                         }
+            call_str = _convert_func_call_attributes_to_str(func, func_args, func_kwargs, decorator_kwargs)
+            response_from_service = cache_get(call_str)
 
-            response_from_cache = cache_get(cache_key)
-
-            if response_from_cache:
-                logging.debug(f"Redis returned object from cache for key ({cache_key}):" + str(response_from_cache))
-                return response_from_cache
+            if response_from_service:
+                logging.debug(f"Redis returned object from cache for key ({call_str}):" + str(response_from_service))
+                return response_from_service
             else:
                 response = func(*func_args, **func_kwargs)
-                logging.debug(f"Redis returned object from wrapped function for key ({cache_key}): " + str(response))
-                cache_set(cache_key, response)
+                logging.debug(f"Redis returned object from wrapped function for key ({call_str}): " + str(response))
+                cache_set(call_str, response)
             return response
 
         return wrapper
@@ -175,15 +190,24 @@ def cache(**decorator_kwargs):
     return decorator
 
 
-def setup(host='127.0.0.1', port=6379, startup_nodes=None, prefix="", expire=1200, alive_check_timeout=5, **kwargs):
+def delete_all_keys_starting_with(prefix):
+    global conn
+    for key in conn.scan_iter(prefix + '*'):
+        conn.delete(key)
+
+
+def setup(host='127.0.0.1', port=6379, startup_nodes=None, prefix="", expire=1200, alive_check_timeout=5,
+          shared_across_processes=True, **kwargs):
     global key_prefix
     global key_expire
     global _alive_check_timeout
+    global _shared_across_processes
     global conn
 
     key_prefix = prefix
     key_expire = expire
     _alive_check_timeout = alive_check_timeout
+    _shared_across_processes = shared_across_processes
 
     if startup_nodes is None:
         conn = redis.Redis(host=host, port=port, **kwargs)
