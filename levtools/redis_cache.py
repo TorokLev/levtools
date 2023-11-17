@@ -158,13 +158,26 @@ def _convert_func_call_attributes_to_str(func, func_args, func_kwargs, decorator
     return cache_key
 
 
+def checkpoint_caching(key, func, func_args, **func_kwargs):
+
+    if not check_server_alive():
+        return func(*func_args, **func_kwargs)
+
+    response_from_service = cache_get(key)
+    if response_from_service:
+        logging.debug(f"Redis returned object from cache for key ({key}):" + str(response_from_service))
+        return response_from_service
+    else:
+        response_from_func = func(*func_args, **func_kwargs)
+        logging.debug(f"Redis returned object from wrapped function for key ({key}): " + str(response_from_func))
+        cache_set(key, response_from_func)
+        return response_from_func
+
+
 def cache(**decorator_kwargs):
     """
     Decorator
     """
-
-    global server_alive
-    global key_prefix
 
     def decorator(func):
 
@@ -236,4 +249,3 @@ def close():
 
     server_alive = False
     check_deadline = -1
-
