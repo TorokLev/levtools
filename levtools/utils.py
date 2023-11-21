@@ -19,12 +19,15 @@ TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 def exec(cli, cwd="."):
-    process = subprocess.Popen(cli, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
+    process = subprocess.Popen(
+        cli, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd
+    )
     out, err = process.communicate()
-    return {"out": out.decode('utf-8'),
-            "err": err.decode('utf-8'),
-            "return_code": process.returncode
-            }
+    return {
+        "out": out.decode("utf-8"),
+        "err": err.decode("utf-8"),
+        "return_code": process.returncode,
+    }
 
 
 def dict_from_module(module):
@@ -47,9 +50,9 @@ def get_recursive_modif_dates(dir):
 
 
 def base64_decode(base64_message):
-    base64_bytes = base64_message.encode('ascii')
+    base64_bytes = base64_message.encode("ascii")
     message_bytes = base64.b64decode(base64_bytes)
-    return message_bytes.decode('ascii')
+    return message_bytes.decode("ascii")
 
 
 def none_resilient_max(arr):
@@ -60,13 +63,15 @@ def flatten(list_of_lists):
     return list(itertools.chain.from_iterable(list_of_lists))
 
 
-def flatten_dict(d: MutableMapping, sep: str= '.') -> MutableMapping:
-    [flat_dict] = pd.json_normalize(d, sep=sep).to_dict(orient='records')
+def flatten_dict(d: MutableMapping, sep: str = ".") -> MutableMapping:
+    [flat_dict] = pd.json_normalize(d, sep=sep).to_dict(orient="records")
     return flat_dict
 
 
 def replace_in_keys(input_dict, from_what, to_what):
-    return dict([(key.replace(from_what, to_what), value) for key, value in input_dict.items()])
+    return dict(
+        [(key.replace(from_what, to_what), value) for key, value in input_dict.items()]
+    )
 
 
 def json_load_from_file(json_filename):
@@ -93,9 +98,9 @@ def get_size(obj, seen=None):  # TODO: bugfix to be able to measure MABs size
     if isinstance(obj, dict):
         size += sum([get_size(v, seen) for v in obj.values()])
         size += sum([get_size(k, seen) for k in obj.keys()])
-    elif hasattr(obj, '__dict__'):
+    elif hasattr(obj, "__dict__"):
         size += get_size(obj.__dict__, seen)
-    elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
+    elif hasattr(obj, "__iter__") and not isinstance(obj, (str, bytes, bytearray)):
         size += sum([get_size(i, seen) for i in obj])
     return size
 
@@ -104,17 +109,22 @@ def to_json(obj):
     def default_serializer(obj):
         if isinstance(obj, (datetime.date, datetime.datetime)):
             return obj.isoformat()
+        if type(obj) == pd.core.frame.DataFrame:
+            return obj.to_json()
         if hasattr(obj, "__dict__"):
             return obj.__dict__
         return str(obj)
 
     return json.dumps(obj, default=default_serializer, sort_keys=True, indent=4)
 
+
 def pprint(obj):
     print(to_json(obj))
 
 
-def grep_cut(input_string, match, field=None, field_from=None, field_to=None, field_separator=' '):
+def grep_cut(
+    input_string, match, field=None, field_from=None, field_to=None, field_separator=" "
+):
     for line in input_string.splitlines():
         if match in line:
             parts = line.split(field_separator)
@@ -125,10 +135,10 @@ def grep_cut(input_string, match, field=None, field_from=None, field_to=None, fi
 
 def get_pip_version(pkg_name):
     ret = exec("pip show " + pkg_name)
-    if ret['return_code'] != 0:
+    if ret["return_code"] != 0:
         return
 
-    return grep_cut(ret['out'], match="Version:", field=1)
+    return grep_cut(ret["out"], match="Version:", field=1)
 
 
 def get_pkgroot(pkg):
@@ -149,20 +159,22 @@ def get_module_version_if_loadable(pkg):
     except Exception:
         commit_id = ""
 
-    return {'commit_id': commit_id, 'model_id': model_id}
+    return {"commit_id": commit_id, "model_id": model_id}
 
 
-def path_resolver(in_path, create_dirs=False, create_as_dir=False, rebase_dir='.'):
+def path_resolver(in_path, create_dirs=False, create_as_dir=False, rebase_dir="."):
     """
-        If path is <...> string then package root is substituted.
-        If create_dirs is set then all parent dirs created.
-        If create_as_dir then this and parent directories created
-        If package name is 'tmpdir' then temp directory created to systems temp directory
+    If path is <...> string then package root is substituted.
+    If create_dirs is set then all parent dirs created.
+    If create_as_dir then this and parent directories created
+    If package name is 'tmpdir' then temp directory created to systems temp directory
     """
     if in_path.startswith("<") and in_path.find(">") > 0:
-        pkg_name = in_path[1:in_path.find(">")]
-        if pkg_name == 'tmpdir':
-            in_path = in_path.replace("<" + pkg_name + ">", tempfile.TemporaryDirectory().name)
+        pkg_name = in_path[1 : in_path.find(">")]
+        if pkg_name == "tmpdir":
+            in_path = in_path.replace(
+                "<" + pkg_name + ">", tempfile.TemporaryDirectory().name
+            )
         else:
             pkgroot = get_pkgroot(pkg_name)
             in_path = in_path.replace("<" + pkg_name + ">", pkgroot)
@@ -177,20 +189,18 @@ def path_resolver(in_path, create_dirs=False, create_as_dir=False, rebase_dir='.
 
 
 def assert_for_unknown_params(kwargs, known_params):
-
     n_of_unknown_params = len(set(kwargs.keys()).difference(known_params)) == 0
     assert n_of_unknown_params, "Unkown parameters passed: " + str(kwargs)
 
 
 def _windows_to_linux(input_path):
-    path = input_path.replace('\\', '/')
-    return path[2:] if path[1] == ':' else path
+    path = input_path.replace("\\", "/")
+    return path[2:] if path[1] == ":" else path
 
 
 def _linux_to_windows(input_path):
-    
     path = os.path.expanduser(input_path) if input_path.startswith("~") else input_path
-    path = os.path.normpath(path) # replaces /  with \\ on Windows
+    path = os.path.normpath(path)  # replaces /  with \\ on Windows
     return path
 
 
@@ -210,32 +220,33 @@ def rebase_path_if_relative(base_path, input_path):
         return None
     return os.path.normpath(
         os.path.join(path(base_path), input_path)
-        if is_rel_path(input_path) else path(input_path)
+        if is_rel_path(input_path)
+        else path(input_path)
     )
 
 
 def is_windows():
-    return hasattr(sys, 'getwindowsversion')
+    return hasattr(sys, "getwindowsversion")
 
 
 def is_linux():
-    return os.name == 'posix'
+    return os.name == "posix"
 
 
 def is_windows_path(input_path):
-    return '\\' in input_path
+    return "\\" in input_path
 
 
 def is_linux_path(input_path):
-    return '/' in input_path
+    return "/" in input_path
 
-    
+
 def path(input_path):
     """
     Translate path if written not the same platform as the current one.
     I.e Linux -> Win or Win -> Linux
     """
-    
+
     if is_linux():  # running on Linux of Mac platform
         if is_windows_path(input_path):
             return _windows_to_linux(input_path)
@@ -261,7 +272,7 @@ def to_datetime(date_str, to_naive=True):
 
 def get_random_string(len):
     letters = string.ascii_lowercase
-    random_string = (''.join(random.choice(letters) for i in range(len)))
+    random_string = "".join(random.choice(letters) for i in range(len))
     return random_string
 
 
@@ -282,15 +293,11 @@ def firstn(iterator, n):
 
 
 def keep_by_set(source, keep_set):
-    return [entry
-            for entry in source
-            if entry in keep_set]
+    return [entry for entry in source if entry in keep_set]
 
 
 def drop_by_set(source, drop_set):
-    return [entry
-            for entry in source
-            if entry not in drop_set]
+    return [entry for entry in source if entry not in drop_set]
 
 
 def days_from_epoch(input_datetime):
