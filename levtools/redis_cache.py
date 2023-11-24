@@ -104,18 +104,27 @@ def cache_get(key):
         logging.error("Redis server error: " + str(e))
 
 
-def cache_get_protected(key):
-    global server_alive
-    if server_alive:
-        return cache_get(key)
-    else:
-        return None
+def cache_delete(key):
+    global conn
 
+    try:
+        cache_key = generate_hash_with_prefix(key)
+        response = conn.delete(cache_key)
 
-def cache_set_protected(key, value):
-    global server_alive
-    if server_alive:
-        cache_set(key, value)
+        logging.debug(f"Redis delete cache for key ({key}):" + str(response))
+
+        return response
+
+    except redis.ConnectionError as e:
+        server_down()
+        logging.error("Redis server down: cache disabled in cache_get!")
+
+    except json.JSONDecodeError:
+        pass
+
+    except Exception as e:
+        server_down()
+        logging.error("Redis server error: " + str(e))
 
 
 def cache_set(key, value):

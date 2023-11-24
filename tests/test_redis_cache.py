@@ -6,7 +6,7 @@ from levtools import redis_cache
 logging.basicConfig(level="DEBUG", force=True)
 
 
-def test_get_set():
+def test_set_get_delete():
     # lower layer test
     redis_cache.setup(prefix="test_redis_cache")
     if not redis_cache.check_server_alive():
@@ -20,28 +20,10 @@ def test_get_set():
     redis_cache.cache_set("2", "random_value2")
     assert redis_cache.cache_get("2") == "random_value2"
 
-    redis_cache.delete_all_keys()
+    redis_cache.cache_delete("1")
+    redis_cache.cache_delete("2")
+
     redis_cache.close()
-
-
-def test_redis_func_decorator_without_redis_server():
-    redis_cache.close()
-    assert not redis_cache.check_server_alive()
-
-    calculated_in_function = False
-
-    @redis_cache.cache()
-    def dummy(variable):
-        nonlocal calculated_in_function
-        calculated_in_function = True
-        return variable + 3
-
-    assert dummy(2) == 2 + 3
-    assert calculated_in_function
-
-    calculated_in_function = False
-    assert dummy(2) == 2 + 3
-    assert calculated_in_function
 
 
 def test_redis_func_decorator_with_redis_server():
@@ -65,8 +47,29 @@ def test_redis_func_decorator_with_redis_server():
     calculated_in_function = False
     assert dummy(2) == 2 + 3
     assert not calculated_in_function
-
     redis_cache.delete_all_keys()
+    redis_cache.close()
+
+
+def test_redis_func_decorator_without_redis_server():
+    redis_cache.close()
+
+    not_from_cache = None
+
+    # missing setup to prevent redis client connection
+    @redis_cache.cache()
+    def dummy(variable):
+        nonlocal not_from_cache
+        not_from_cache = True
+        return variable + 3
+
+    assert dummy(1) == 1 + 3
+    assert not_from_cache
+
+    not_from_cache = False
+    assert dummy(1) == 1 + 3
+    assert not_from_cache
+
     redis_cache.close()
 
 
