@@ -74,6 +74,28 @@ def test_redis_func_decorator_without_redis_server():
     cache.close()
 
 
+def test_redis_func_decorator_without_redis_server():
+    redis_cache.Redis().close()
+
+    not_from_cache = None
+
+    # missing setup to prevent redis client connection
+    @redis_cache.cache()
+    def dummy(variable):
+        nonlocal not_from_cache
+        not_from_cache = True
+        return variable + 3
+
+    assert dummy(1) == 1 + 3
+    assert not_from_cache
+
+    not_from_cache = False
+    assert dummy(1) == 1 + 3
+    assert not_from_cache
+
+    redis_cache.Redis().close()
+
+
 def test_redis_class_member_decorator_with_redis_server():
     cache = redis_cache.Redis().setup()
     if not cache.check_server_alive():
