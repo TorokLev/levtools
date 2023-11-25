@@ -18,5 +18,11 @@ classifiers = [
 "Bug Tracker" = "https://github.com/pypa/sampleproject/issues"
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0",
+            "redis-py-cluster",
+            "redis",
+            "pymc>=5.9",
+            "pytest",
+            "pytest-cov",
+            "pytest-env"]
 build-backend = "setuptools.build_meta"

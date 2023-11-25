@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import time
+import pandas as pd
 
 import redis
 import rediscluster
@@ -11,142 +12,165 @@ from . import utils as u
 
 # alternative to https://github.com/comeuplater/fastapi_cache
 # or RedisCacheBackend https://pythonrepo.com/repo/comeuplater-fastapi_cache-python-fastapi-utilities
-# or apshceduler at https://gist.github.com/ivanleoncz/21293b00d0ea54db8ee3b57fb1170ddf
+# or apscheduler at https://gist.github.com/ivanleoncz/21293b00d0ea54db8ee3b57fb1170ddf
 # or async event loops for signal handling
 # Beware that callers are from different processes
-
 
 # Singleton since modules are singleton in Python
 # Only server_up and server_down are meant to be used for manipulating these variables
 # and server_alive for checking
 
-server_alive = False
-conn = None
-key_expire = 1200
-key_prefix = ""
-
-check_deadline = -1
-_alive_check_timeout = 5
-_shared_across_processes = True
+# state variables:
+logging.basicConfig()
+logger = logging.getLogger("root")
 
 
-def server_down():
-    """
-    sets internal state variable to down
-    """
-    global server_alive
-    global check_deadline
-    global _alive_check_timeout
-
-    logging.warning("Redis server down")
+class Redis(u.SingletonClass):
     server_alive = False
-    check_deadline = time.time() + _alive_check_timeout
+    conn = None
 
+    _next_check_deadline = -1
+    _alive_check_timeout = 5
+    _shared_across_processes = True
 
-def server_up():
-    """
-    sets internal state variable to up
-    """
-    global server_alive
-    global check_deadline
+    def setup(
+        self,
+        host="127.0.0.1",
+        port=6379,
+        startup_nodes=None,
+        key_expire=1200,
+        alive_check_timeout=5,
+        shared_across_processes=True,
+        **kwargs,
+    ):
+        self._alive_check_timeout = alive_check_timeout
+        self._shared_across_processes = shared_across_processes
 
-    logging.warning("Redis server up")
-    server_alive = True
-    check_deadline = -1
+        if startup_nodes is None:
+            self.conn = redis.Redis(host=host, port=port, **kwargs)
+            logger.debug("Redis client started")
+        else:
+            self.conn = rediscluster.RedisCluster(
+                startup_nodes=startup_nodes, decode_responses=True, **kwargs
+            )
+            logger.debug("RedisCluster client started")
 
+        self._low_level_check()
+        return self
 
-def check_server_alive(enforce_check=False) -> bool:
-    global conn
-    global server_alive
-    global check_deadline
+    def close(self):
+        self.server_alive = False
+        self._next_check_deadline = -1
 
-    if server_alive:
-        return True
+        if self.conn:
+            self.conn.close()
+            self.conn = None
 
-    if check_deadline < time.time() or enforce_check:
+    def _server_down(self):
+        """
+        sets internal state variable to down
+        """
+        logger.warning("Redis server down")
+        self.server_alive = False
+        self._next_check_deadline = time.time() + self._alive_check_timeout
+
+    def _server_up(self):
+        """
+        sets internal state variable to up
+        """
+        logger.warning("Redis server up")
+        self.server_alive = True
+        self._next_check_deadline = -1
+
+    def _low_level_check(self):
         try:
-            conn.ping()
-            server_up()
+            self.conn.ping()
+            self._server_up()
             return True
         except:
-            server_down()
+            self._server_down()
+            return False
 
-    return False
+    def check_server_alive(self):
+        if self.server_alive:
+            return True
 
+        if self._next_check_deadline < time.time():
+            return self._low_level_check()
 
-def gen_hash(input_str):
-    return str(hashlib.sha256(input_str.encode("utf-8")).hexdigest())
+        return False
 
+    @staticmethod
+    def hash_it(input_str):
+        return str(hashlib.sha256(str(input_str).encode("utf-8")).hexdigest())
 
-def generate_hash_with_prefix(input_dict):
-    return key_prefix + ":" + gen_hash(json.dumps(input_dict))
+    def _cache_set(self, key, value, prefix=""):
+        cache_key = (prefix + ":" if len(prefix) > 0 else "") + self.hash_it(key)
+        if type(value) == pd.DataFrame:
+            value_json = u.to_json({"type": str(type(value)), "value": value.to_json()})
+        else:
+            value_json = u.to_json({"type": str(type(value)), "value": str(value)})
 
+        self.conn.set(cache_key, value_json)
 
-def cache_get(key):
-    global conn
-
-    try:
-        cache_key = generate_hash_with_prefix(key)
-        response = conn.get(cache_key)
+    def _cache_get(self, key, prefix=""):
+        cache_key = (prefix + ":" if len(prefix) > 0 else "") + self.hash_it(key)
+        response = self.conn.get(cache_key)
         if response:
-            decoded_response = json.loads(response)["value"]
-            return decoded_response
+            decoded_response = json.loads(response)
+            if decoded_response["type"] == "<class 'pandas.core.frame.DataFrame'>":
+                return pd.DataFrame(json.loads(decoded_response["value"]))
+            elif decoded_response["type"] == "<class 'float'>":
+                return float(decoded_response["value"])
+            elif decoded_response["type"] == "<class 'int'>":
+                return int(decoded_response["value"])
+            return decoded_response["value"]  # str or something I dont know
 
-    except redis.ConnectionError as e:
-        server_down()
-        logging.error("Redis server down: cache disabled in cache_get!")
-
-    except json.JSONDecodeError:
-        logging.error("Redis server corrupted response!")
-
-    except Exception as e:
-        server_down()
-        logging.error("Redis server error: " + str(e))
-
-
-def cache_delete(key):
-    global conn
-
-    try:
-        cache_key = generate_hash_with_prefix(key)
-        response = conn.delete(cache_key)
-
-        logging.debug(f"Redis delete cache for key ({key}):" + str(response))
-
+    def _cache_delete(self, key, prefix=""):
+        cache_key = (prefix + ":" if len(prefix) > 0 else "") + self.hash_it(key)
+        response = self.conn.delete(cache_key)
+        logger.debug(f"Redis delete cache for key ({key}):" + str(response))
         return response
 
-    except redis.ConnectionError as e:
-        server_down()
-        logging.error("Redis server down: cache disabled in cache_get!")
+    def _delete_all_keys(self, prefix=""):
+        for key in self.conn.scan_iter(prefix + ":*" if len(prefix) > 0 else "*"):
+            self.conn.delete(key)
 
-    except json.JSONDecodeError:
-        pass
+    def _error_handler_wrapper(self, func, *args, **kwargs):
+        return func(*args, **kwargs)
 
-    except Exception as e:
-        server_down()
-        logging.error("Redis server error: " + str(e))
+    def _error_handler_wrapper_(self, func, *args, **kwargs):
+        try:
+            if not self.check_server_alive():
+                return
+
+            return func(*args, **kwargs)
+
+        except redis.ConnectionError as e:
+            self._server_down()
+            logging.error("Redis server down: cache disabled!")
+
+        except json.JSONDecodeError as e:
+            logging.error("Json decoding error:" + str(e))
+
+        except Exception as e:
+            self._server_down()
+            logging.error("Redis server error: " + str(e))
+
+    def get(self, key, prefix=""):
+        return self._error_handler_wrapper(self._cache_get, key, prefix)
+
+    def set(self, key, value, prefix=""):
+        return self._error_handler_wrapper(self._cache_set, key, value, prefix)
+
+    def delete(self, key, prefix):
+        return self._error_handler_wrapper(self._cache_delete, key, prefix)
+
+    def delete_all_keys(self, filtering_prefix=""):
+        return self._error_handler_wrapper(self._delete_all_keys, filtering_prefix)
 
 
-def cache_set(key, value):
-    global conn
-    global key_expire
-
-    try:
-        cache_key = generate_hash_with_prefix(key)
-        value_json = u.to_json({"type": "pure", "value": value})
-        conn.set(cache_key, value_json)
-        conn.expire(cache_key, key_expire)
-
-    except redis.ConnectionError as e:
-        server_down()
-        logging.error("Redis server down: cache disabled in cache_get!")
-
-    except json.JSONDecodeError:
-        logging.error("Redis key cannot be Json encoded! " + str(key))
-
-    except Exception as e:
-        server_down()
-        logging.error("Redis cache disabled in cache_set! + Exception: " + str(e))
+_redis_obj = Redis()
 
 
 def _convert_func_call_attributes_to_str(
@@ -154,7 +178,7 @@ def _convert_func_call_attributes_to_str(
 ):
     func_name = str(func)
 
-    if _shared_across_processes:
+    if _redis_obj._shared_across_processes:
         func_name = func_name[: func_name.find("at")] + ">"
 
     module = func.__globals__["__file__"]
@@ -169,24 +193,25 @@ def _convert_func_call_attributes_to_str(
     return cache_key
 
 
-def checkpoint_caching(key, func, func_args=(), **func_kwargs):
-    if not check_server_alive():
+def checkpoint_caching(key, func, prefix="", func_args=(), **func_kwargs):
+    if not _redis_obj.check_server_alive():
+        logger.debug("Redis not alive: func exec")
         return func(*func_args, **func_kwargs)
 
-    response_from_service = cache_get(key)
-    if response_from_service:
-        logging.debug(
+    response_from_service = _redis_obj.get(key, prefix)
+    if response_from_service is not None:
+        logger.debug(
             f"Redis returned object from cache for key ({key}):"
             + str(response_from_service)
         )
         return response_from_service
     else:
         response_from_func = func(*func_args, **func_kwargs)
-        logging.debug(
+        logger.debug(
             f"Redis returned object from wrapped function for key ({key}): "
             + str(response_from_func)
         )
-        cache_set(key, response_from_func)
+        _redis_obj.set(key, response_from_func, prefix)
         return response_from_func
 
 
@@ -198,88 +223,29 @@ def cache(**decorator_kwargs):
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*func_args, **func_kwargs):
-            if not check_server_alive():
+            if not _redis_obj.check_server_alive():
                 return func(*func_args, **func_kwargs)
 
             call_str = _convert_func_call_attributes_to_str(
                 func, func_args, func_kwargs, decorator_kwargs
             )
-            response_from_service = cache_get(call_str)
+            response_from_service = _redis_obj.get(call_str)
 
-            if response_from_service:
-                logging.debug(
+            if response_from_service is not None:
+                logger.debug(
                     f"Redis returned object from cache for key ({call_str}):"
                     + str(response_from_service)
                 )
                 return response_from_service
             else:
                 response = func(*func_args, **func_kwargs)
-                logging.debug(
+                logger.debug(
                     f"Redis returned object from wrapped function for key ({call_str}): "
                     + str(response)
                 )
-                cache_set(call_str, response)
+                _redis_obj.set(call_str, response)
             return response
 
         return wrapper
 
     return decorator
-
-
-def delete_all_keys():
-    global conn
-    global key_prefix
-    for key in conn.scan_iter(key_prefix + "*"):
-        conn.delete(key)
-
-
-def setup(
-    host="127.0.0.1",
-    port=6379,
-    startup_nodes=None,
-    prefix="",
-    expire=1200,
-    alive_check_timeout=5,
-    shared_across_processes=True,
-    **kwargs,
-):
-    global key_prefix
-    global key_expire
-    global _alive_check_timeout
-    global _shared_across_processes
-    global conn
-
-    key_prefix = prefix
-    key_expire = expire
-    _alive_check_timeout = alive_check_timeout
-    _shared_across_processes = shared_across_processes
-
-    if startup_nodes is None:
-        conn = redis.Redis(host=host, port=port, **kwargs)
-        logging.debug("Redis client started")
-    else:
-        conn = rediscluster.RedisCluster(
-            startup_nodes=startup_nodes, decode_responses=True, **kwargs
-        )
-        logging.debug("RedisCluster client started")
-
-    check_server_alive(enforce_check=True)
-    if check_server_alive():
-        conn.flushall()
-    else:
-        logging.warning("No Redis server found")
-
-
-def close():
-    global conn
-    global server_alive
-    global check_deadline
-
-    server_alive = False
-
-    if conn:
-        conn.close()
-        conn = None
-
-    server_alive = False
-    check_deadline = -1
