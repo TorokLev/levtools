@@ -5,10 +5,9 @@ from levtools import parallel as par
 
 
 def test_same_data_multiple_executions_args_only():
-
     # given
     def func(a):
-        return a+a
+        return a + a
 
     data = 3
     n_workers = 4
@@ -22,25 +21,25 @@ def test_same_data_multiple_executions_args_only():
 
 
 def test_same_data_multiple_executions_args_and_kwargs():
-
     # given
     def func(a, b):
-        return a*a + b
+        return a * a + b
 
     data_args = 3
-    data_kwargs = {'b': 4}
+    data_kwargs = {"b": 4}
     n_workers = 4
     expected = [func(data_args, **data_kwargs) for _ in range(n_workers)]
 
     # that
-    actual = par.parallel_executions_on_same_data(func, args=data_args, workers=n_workers, **data_kwargs)
+    actual = par.parallel_executions_on_same_data(
+        func, args=data_args, workers=n_workers, **data_kwargs
+    )
 
     # then
     assert expected == actual
 
 
 def test_map():
-
     # given
     def func(a):
         return a + a
@@ -57,22 +56,21 @@ def test_map():
 
 
 def test_map_with_timeout():
+    # given
+    def sleeper_proc(a):
+        time.sleep(a)
+        return a * 10
 
-        # given
-        def sleeper_proc(a):
-            time.sleep(a)
-            return a * 10
+    input = np.array([1, 1, 1, 5, 5, 5]) / 10
+    timeout = 0.3  # sec
+    expected = [1.0, 1.0, 1.0, None, None, None]  # kills process longer then 0.35 sec
+    n_workers = 4
 
-        input = np.array([1, 1, 1, 5, 5, 5]) / 10
-        timeout = 0.3  # sec
-        expected = [1.0, 1.0, 1.0, None, None, None]  # kills process longer then 0.35 sec
-        n_workers = 4
+    # that
+    actual = par.map(sleeper_proc, input, workers=n_workers, timeout=timeout)
 
-        # that
-        actual = par.map(sleeper_proc, input, workers=n_workers, timeout=timeout)
-
-        # then
-        assert expected == actual
+    # then
+    assert expected == actual
 
 
 def test_map_without_timeout():
@@ -90,3 +88,21 @@ def test_map_without_timeout():
 
     # then
     assert expected == actual
+
+
+ms = 0.001
+
+
+def task(n):
+    time.sleep(20 * ms)
+    return 1
+
+
+def test_parallel():
+    par_obj = par.Parallel(func=task)
+
+    list_of_numbers = range(1000)
+
+    par_obj(list_of_numbers)
+
+    par_obj.terminate()
