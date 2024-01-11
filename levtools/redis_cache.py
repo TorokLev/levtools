@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import pandas as pd
+import numpy as np
 
 import redis
 import rediscluster
@@ -23,6 +24,7 @@ from . import utils as u
 # state variables:
 logging.basicConfig()
 logger = logging.getLogger("root")
+logger.setLevel(10)
 
 
 class Redis(u.SingletonClass):
@@ -124,7 +126,9 @@ class Redis(u.SingletonClass):
                 return float(decoded_response["value"])
             elif decoded_response["type"] == "<class 'int'>":
                 return int(decoded_response["value"])
-            return decoded_response["value"]  # str or something I dont know
+            elif decoded_response["type"] == "<class 'numpy.ndarray'>":
+                return np.array(decoded_response["value"])
+            return decoded_response["value"]  # native types
 
     def _cache_delete(self, key, prefix=""):
         cache_key = (prefix + ":" if len(prefix) > 0 else "") + self.hash_it(key)
@@ -136,10 +140,10 @@ class Redis(u.SingletonClass):
         for key in self.conn.scan_iter(prefix + ":*" if len(prefix) > 0 else "*"):
             self.conn.delete(key)
 
-    def _error_handler_wrapper(self, func, *args, **kwargs):
-        return func(*args, **kwargs)
+    # def _error_handler_wrapper(self, func, *args, **kwargs):
+    #    return func(*args, **kwargs)
 
-    def _error_handler_wrapper_(self, func, *args, **kwargs):
+    def _error_handler_wrapper(self, func, *args, **kwargs):
         try:
             if not self.check_server_alive():
                 return
@@ -158,13 +162,13 @@ class Redis(u.SingletonClass):
             logging.error("Redis server error: " + str(e))
 
     def get(self, key, prefix=""):
-        return self._error_handler_wrapper(self._cache_get, key, prefix)
+        return self._error_handler_wrapper(self._cache_get, key=key, prefix=prefix)
 
     def set(self, key, value, prefix=""):
-        return self._error_handler_wrapper(self._cache_set, key, value, prefix)
+        return self._error_handler_wrapper(self._cache_set, key=key, value=value, prefix=prefix)
 
     def delete(self, key, prefix):
-        return self._error_handler_wrapper(self._cache_delete, key, prefix)
+        return self._error_handler_wrapper(self._cache_delete, key=key, prefix=prefix)
 
     def delete_all_keys(self, filtering_prefix=""):
         return self._error_handler_wrapper(self._delete_all_keys, filtering_prefix)
@@ -176,7 +180,7 @@ _redis_obj = Redis()
 def _convert_func_call_attributes_to_str(
     func, func_args, func_kwargs, decorator_kwargs
 ):
-    func_name = str(func)
+    func_name = func.__name__
 
     if _redis_obj._shared_across_processes:
         func_name = func_name[: func_name.find("at")] + ">"
@@ -193,25 +197,42 @@ def _convert_func_call_attributes_to_str(
     return cache_key
 
 
-def checkpoint_caching(key, func, prefix="", func_args=(), **func_kwargs):
+def checkpoint_caching(func,
+                       prefix="",
+                       key="",
+                       to_json_converter=json.dumps,
+                       from_json_converter=json.loads,
+                       func_args=(), **func_kwargs):
+    """
+    func:  function to be cached, func name added to prefix
+    func_args, func_kwargs:  parameters of the function (encoded in hash)
+    prefix:  redis_cache_prefix
+    key:     encoded in hash
+    to_json_converter:  if json.dumps is not sufficient supply your own
+    from_json_converter:  if json.dumps is not sufficient supply your own
+    """
+
+    redis_key = f"key: {key} :func: {func.__name__} :args: {str(func_args)} :kwargs: {str(func_kwargs)}"
+
     if not _redis_obj.check_server_alive():
         logger.debug("Redis not alive: func exec")
         return func(*func_args, **func_kwargs)
 
-    response_from_service = _redis_obj.get(key, prefix)
+    response_from_service = _redis_obj.get(key=redis_key, prefix=prefix)
     if response_from_service is not None:
         logger.debug(
-            f"Redis returned object from cache for key ({key}):"
-            + str(response_from_service)
+            f"Redis returned object from cache for prefix {prefix}, key ({redis_key}): value {response_from_service[:10]}"
         )
-        return response_from_service
+        return from_json_converter(response_from_service)
     else:
+        logger.debug(f"No Redis response prefix {prefix}, key ({redis_key})")
         response_from_func = func(*func_args, **func_kwargs)
+
+        json_response_from_func = to_json_converter(response_from_func)
         logger.debug(
-            f"Redis returned object from wrapped function for key ({key}): "
-            + str(response_from_func)
+            f"Redis returned object from wrapped function for prefix {prefix}, key ({redis_key}): value {json_response_from_func[:10]} "
         )
-        _redis_obj.set(key, response_from_func, prefix)
+        _redis_obj.set(key=redis_key, prefix=prefix, value=json_response_from_func)
         return response_from_func
 
 
