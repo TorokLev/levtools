@@ -1,12 +1,18 @@
 import multiprocessing as mp
 import queue
 import traceback
+import os
+import time
+import numpy as np
 
-mp.freeze_support() # for windows
-#mp.set_start_method("spawn")
+
+mp.freeze_support()  # for windows
+# mp.set_start_method("spawn")
 
 
-def parallel_executions_on_same_data(worker_function, args, workers=mp.cpu_count(), debug=False, **kwargs):
+def parallel_executions_on_same_data(
+    worker_function, args, workers=mp.cpu_count(), debug=False, **kwargs
+):
     """
     returns: [func(args, **kwargs) for _ in range(workers)]
 
@@ -23,10 +29,12 @@ def parallel_executions_on_same_data(worker_function, args, workers=mp.cpu_count
         child_pipe_endpoint.send(returned)
 
     pipes = [mp.Pipe() for _ in range(workers)]
-    processes = [mp.Process(target=wrapped_func, args=(child_end,))
-                 for parent_end, child_end in pipes]
+    processes = [
+        mp.Process(target=wrapped_func, args=(child_end,))
+        for parent_end, child_end in pipes
+    ]
 
-    for (parent_end, _) in pipes:
+    for parent_end, _ in pipes:
         parent_end.send(args)
         parent_end.send(kwargs)
 
@@ -106,9 +114,11 @@ def _supervisor(worker_function, tasks_queue, results_queue, timeout):
         inp_inx, inp = tasks_queue.get()
         down_tasks_queue.put(inp)
 
-        proc = mp.Process(name=name + '_executor',
-                          target=_func_executor_from_queues,
-                          args=(worker_function, down_tasks_queue, down_results_queue))
+        proc = mp.Process(
+            name=name + "_executor",
+            target=_func_executor_from_queues,
+            args=(worker_function, down_tasks_queue, down_results_queue),
+        )
 
         proc.start()
         try:
@@ -139,10 +149,14 @@ def map(func, iterable, timeout=None, workers=mp.cpu_count()):
     n_items = len(iterable)
     tasks_queue = mp.Queue()
     results_queue = mp.Queue()
-    processes = [mp.Process(name="manager: " + str(worker_inx),
-                            target=executor,
-                            args=(func, tasks_queue, results_queue, timeout))
-                 for worker_inx in range(workers)]
+    processes = [
+        mp.Process(
+            name="manager: " + str(worker_inx),
+            target=executor,
+            args=(func, tasks_queue, results_queue, timeout),
+        )
+        for worker_inx in range(workers)
+    ]
 
     for inp_inx, item in enumerate(iterable):
         tasks_queue.put((inp_inx, item))
@@ -152,11 +166,61 @@ def map(func, iterable, timeout=None, workers=mp.cpu_count()):
 
     recv_list = [None] * n_items
     for ix in range(n_items):
-        inp_ix, recv = results_queue.get()  # it may block here if one of the processes blocks (non-timeout case)
-                                            # or if supervisor hangs
+        (
+            inp_ix,
+            recv,
+        ) = (
+            results_queue.get()
+        )  # it may block here if one of the processes blocks (non-timeout case)
+        # or if supervisor hangs
         recv_list[inp_ix] = recv
 
     for process in processes:
-           process.join()
+        process.join()
 
     return recv_list
+
+
+def func_wrapper(func, input_queue, output_queue):
+    np.random.seed((os.getpid() * int(time.time())) % 123456789)
+    while True:
+        one = input_queue.get(block=True)
+        res = func(one)
+        output_queue.put(res)
+
+
+class Parallel:
+    """
+    With this class one can start parallel worker processes executing the func,
+    use __call__ function to distribute jobs later as many one will, even repeatedly,
+    until explicitly terminated by terminate()
+    """
+
+    def __init__(self, func, n_processes=mp.cpu_count()):
+        self.func = func
+        self.n_processes = n_processes
+
+        self.down_queue = mp.Queue()
+        self.up_queue = mp.Queue()
+        self.processes = [
+            mp.Process(
+                target=func_wrapper, args=(self.func, self.down_queue, self.up_queue)
+            )
+            for _ in range(self.n_processes)
+        ]
+
+        for process in self.processes:
+            process.start()
+
+    def terminate(self):
+        for process in self.processes:
+            process.terminate()
+
+    def __call__(self, data, block=True, timeout=None):
+        for one in data:
+            self.down_queue.put(one)
+        ret = [
+            self.up_queue.get(block=block, timeout=timeout) for _ in range(len(data))
+        ]
+
+        return ret

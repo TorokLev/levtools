@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import pandas as pd
+import numpy as np
 
 import redis
 import rediscluster
@@ -124,7 +125,9 @@ class Redis(u.SingletonClass):
                 return float(decoded_response["value"])
             elif decoded_response["type"] == "<class 'int'>":
                 return int(decoded_response["value"])
-            return decoded_response["value"]  # str or something I dont know
+            elif decoded_response["type"] == "<class 'numpy.ndarray'>":
+                return np.array(decoded_response["value"])
+            return decoded_response["value"]  # native types
 
     def _cache_delete(self, key, prefix=""):
         cache_key = (prefix + ":" if len(prefix) > 0 else "") + self.hash_it(key)
@@ -136,10 +139,10 @@ class Redis(u.SingletonClass):
         for key in self.conn.scan_iter(prefix + ":*" if len(prefix) > 0 else "*"):
             self.conn.delete(key)
 
-    def _error_handler_wrapper(self, func, *args, **kwargs):
-        return func(*args, **kwargs)
+    # def _error_handler_wrapper(self, func, *args, **kwargs):
+    #    return func(*args, **kwargs)
 
-    def _error_handler_wrapper_(self, func, *args, **kwargs):
+    def _error_handler_wrapper(self, func, *args, **kwargs):
         try:
             if not self.check_server_alive():
                 return
@@ -194,6 +197,8 @@ def _convert_func_call_attributes_to_str(
 
 
 def checkpoint_caching(key, func, prefix="", func_args=(), **func_kwargs):
+    args_str = "args:" + str(func_args) + "kwargs: " + str(func_kwargs)
+    key = key + ":" + str(func) + ":" + Redis().hash_it(args_str)
     if not _redis_obj.check_server_alive():
         logger.debug("Redis not alive: func exec")
         return func(*func_args, **func_kwargs)
