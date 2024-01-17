@@ -22,9 +22,6 @@ from . import utils as u
 # and server_alive for checking
 
 # state variables:
-logging.basicConfig()
-logger = logging.getLogger("root")
-logger.setLevel(10)
 
 
 class Redis(u.SingletonClass):
@@ -50,12 +47,12 @@ class Redis(u.SingletonClass):
 
         if startup_nodes is None:
             self.conn = redis.Redis(host=host, port=port, **kwargs)
-            logger.debug("Redis client started")
+            logging.debug("Redis client started")
         else:
             self.conn = rediscluster.RedisCluster(
                 startup_nodes=startup_nodes, decode_responses=True, **kwargs
             )
-            logger.debug("RedisCluster client started")
+            logging.debug("RedisCluster client started")
 
         self._low_level_check()
         return self
@@ -72,7 +69,7 @@ class Redis(u.SingletonClass):
         """
         sets internal state variable to down
         """
-        logger.warning("Redis server down")
+        logging.warning("Redis server down")
         self.server_alive = False
         self._next_check_deadline = time.time() + self._alive_check_timeout
 
@@ -80,7 +77,7 @@ class Redis(u.SingletonClass):
         """
         sets internal state variable to up
         """
-        logger.warning("Redis server up")
+        logging.warning("Redis server up")
         self.server_alive = True
         self._next_check_deadline = -1
 
@@ -133,7 +130,7 @@ class Redis(u.SingletonClass):
     def _cache_delete(self, key, prefix=""):
         cache_key = (prefix + ":" if len(prefix) > 0 else "") + self.hash_it(key)
         response = self.conn.delete(cache_key)
-        logger.debug(f"Redis delete cache for key ({key}):" + str(response))
+        logging.debug(f"Redis delete cache for key ({key}):" + str(response))
         return response
 
     def _delete_all_keys(self, prefix=""):
@@ -214,24 +211,24 @@ def checkpoint_caching(func,
 
     redis_key = f"key: {key} :func: {func.__name__} :args: {str(func_args)} :kwargs: {str(func_kwargs)}"
 
-
     if not _redis_obj.check_server_alive():
-        logger.debug("Redis not alive: func exec")
+        logging.debug("Redis: Not alive! Function {func.__name__} called")
         return func(*func_args, **func_kwargs)
 
     response_from_service = _redis_obj.get(key=redis_key, prefix=prefix)
     if response_from_service is not None:
-        logger.debug(
-            f"Redis returned object from cache for prefix {prefix}, key ({redis_key}): value {response_from_service[:10]}"
+        logging.debug(
+            f"Redis: Returned response prefix={prefix}, key={redis_key}, value={response_from_service[:10]}..."
         )
         return from_json_converter(response_from_service)
     else:
-        logger.debug(f"No Redis response prefix {prefix}, key ({redis_key})")
+        logging.debug(f"Redis: No response prefix={prefix} key={redis_key}")
+
         response_from_func = func(*func_args, **func_kwargs)
 
         json_response_from_func = to_json_converter(response_from_func)
-        logger.debug(
-            f"Redis returned object from wrapped function for prefix {prefix}, key ({redis_key}): value {json_response_from_func[:10]} "
+        logging.debug(
+            f"Redis: Save to cache prefix={prefix} key={redis_key} value={json_response_from_func[:10]}..."
         )
         _redis_obj.set(key=redis_key, prefix=prefix, value=json_response_from_func)
         return response_from_func
@@ -254,14 +251,14 @@ def cache(**decorator_kwargs):
             response_from_service = _redis_obj.get(call_str)
 
             if response_from_service is not None:
-                logger.debug(
+                logging.debug(
                     f"Redis returned object from cache for key ({call_str}):"
                     + str(response_from_service)
                 )
                 return response_from_service
             else:
                 response = func(*func_args, **func_kwargs)
-                logger.debug(
+                logging.debug(
                     f"Redis returned object from wrapped function for key ({call_str}): "
                     + str(response)
                 )
