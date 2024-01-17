@@ -214,6 +214,7 @@ def checkpoint_caching(func,
 
     redis_key = f"key: {key} :func: {func.__name__} :args: {str(func_args)} :kwargs: {str(func_kwargs)}"
 
+
     if not _redis_obj.check_server_alive():
         logger.debug("Redis not alive: func exec")
         return func(*func_args, **func_kwargs)
