@@ -2,7 +2,7 @@ import base64
 import datetime
 import importlib
 import itertools
-import json
+import json_tricks as json
 import os
 import subprocess
 import sys

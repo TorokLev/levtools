@@ -1,15 +1,33 @@
+"""
+Copyright 2024 Levente Torok TorokLev@gmail.com
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the “Software”), to deal in the Software without restriction, including without limitation the
+
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""
+
 import functools
 import hashlib
 import json
 import logging
 import time
-import pandas as pd
-import numpy as np
+import json_tricks as json
 
 import redis
 import rediscluster
 
-from . import utils as u
+from levtools import utils
+
 
 # alternative to https://github.com/comeuplater/fastapi_cache
 # or RedisCacheBackend https://pythonrepo.com/repo/comeuplater-fastapi_cache-python-fastapi-utilities
@@ -23,8 +41,7 @@ from . import utils as u
 
 # state variables:
 
-
-class Redis(u.SingletonClass):
+class Redis(utils.SingletonClass):
     server_alive = False
     conn = None
 
@@ -33,14 +50,14 @@ class Redis(u.SingletonClass):
     _shared_across_processes = True
 
     def setup(
-        self,
-        host="127.0.0.1",
-        port=6379,
-        startup_nodes=None,
-        key_expire=1200,
-        alive_check_timeout=5,
-        shared_across_processes=True,
-        **kwargs,
+            self,
+            host="127.0.0.1",
+            port=6379,
+            startup_nodes=None,
+            key_expire=1200,
+            alive_check_timeout=5,
+            shared_across_processes=True,
+            **kwargs,
     ):
         self._alive_check_timeout = alive_check_timeout
         self._shared_across_processes = shared_across_processes
@@ -105,27 +122,13 @@ class Redis(u.SingletonClass):
 
     def _cache_set(self, key, value, prefix=""):
         cache_key = (prefix + ":" if len(prefix) > 0 else "") + self.hash_it(key)
-        if type(value) == pd.DataFrame:
-            value_json = u.to_json({"type": str(type(value)), "value": value.to_json()})
-        else:
-            value_json = u.to_json({"type": str(type(value)), "value": str(value)})
-
-        self.conn.set(cache_key, value_json)
+        self.conn.set(cache_key, str(json.dumps(value)))
 
     def _cache_get(self, key, prefix=""):
         cache_key = (prefix + ":" if len(prefix) > 0 else "") + self.hash_it(key)
         response = self.conn.get(cache_key)
         if response:
-            decoded_response = json.loads(response)
-            if decoded_response["type"] == "<class 'pandas.core.frame.DataFrame'>":
-                return pd.DataFrame(json.loads(decoded_response["value"]))
-            elif decoded_response["type"] == "<class 'float'>":
-                return float(decoded_response["value"])
-            elif decoded_response["type"] == "<class 'int'>":
-                return int(decoded_response["value"])
-            elif decoded_response["type"] == "<class 'numpy.ndarray'>":
-                return np.array(decoded_response["value"])
-            return decoded_response["value"]  # native types
+            return json.loads(response.decode("utf-8"))
 
     def _cache_delete(self, key, prefix=""):
         cache_key = (prefix + ":" if len(prefix) > 0 else "") + self.hash_it(key)
@@ -175,7 +178,7 @@ _redis_obj = Redis()
 
 
 def _convert_func_call_attributes_to_str(
-    func, func_args, func_kwargs, decorator_kwargs
+        func, func_args, func_kwargs, decorator_kwargs
 ):
     func_name = func.__name__
 
