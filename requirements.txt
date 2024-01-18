@@ -4,3 +4,4 @@ pytest-cov
 pytest-env
 redis
 redis-py-cluster
+json_tricks
